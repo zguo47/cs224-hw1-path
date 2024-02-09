@@ -111,13 +111,21 @@ std::pair<Vector3f, float> PathTracer::sampleNextDir() {
 
 
 void PathTracer::toneMap(QRgb *imageData, std::vector<Vector3f> &intensityValues) {
-
+    const float gamma = 2.2f;
     for(int y = 0; y < m_height; ++y) {
         for(int x = 0; x < m_width; ++x) {
             int offset = x + (y * m_width);
-
             Vector3f newcolor = intensityValues[offset].cwiseQuotient(Vector3f(1.0f, 1.0f, 1.0f) + intensityValues[offset]);
-            imageData[offset] = qRgb(newcolor[0] * 255, newcolor[1] * 255, newcolor[2] * 255);
+            Vector3f gammaCorrectedColor;
+            gammaCorrectedColor[0] = std::pow(newcolor[0], 1.0f / gamma);
+            gammaCorrectedColor[1] = std::pow(newcolor[1], 1.0f / gamma);
+            gammaCorrectedColor[2] = std::pow(newcolor[2], 1.0f / gamma);
+
+            imageData[offset] = qRgb(
+                std::min(255.0f, std::max(0.0f, gammaCorrectedColor[0] * 255)),
+                std::min(255.0f, std::max(0.0f, gammaCorrectedColor[1] * 255)),
+                std::min(255.0f, std::max(0.0f, gammaCorrectedColor[2] * 255))
+                );
         }
     }
     outputPFM("/Users/shania/cs2240/path-zguo47/student_outputs/milestone/cornell_box_milestone.pfm", 512, 512, intensityValues);
