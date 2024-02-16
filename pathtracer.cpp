@@ -26,7 +26,8 @@ void PathTracer::traceScene(QRgb *imageData, const Scene& scene)
         for(int x = 0; x < m_width; ++x) {
             int offset = x + (y * m_width);
             for (int i = 0; i < settings.samplesPerPixel; i++){
-                intensityValues[offset] += tracePixel(x, y, scene, invViewMat);
+                int sampleIndex = y * m_width * settings.samplesPerPixel + x * settings.samplesPerPixel + i;
+                intensityValues[offset] += tracePixel(x, y, scene, invViewMat, sampleIndex);
             }
             intensityValues[offset] /= settings.samplesPerPixel;
         }
@@ -35,18 +36,28 @@ void PathTracer::traceScene(QRgb *imageData, const Scene& scene)
     toneMap(imageData, intensityValues);
 }
 
-Vector3f PathTracer::tracePixel(int x, int y, const Scene& scene, const Matrix4f &invViewMatrix)
+Vector3f PathTracer::tracePixel(int x, int y, const Scene& scene, const Matrix4f &invViewMatrix, int sampleIndex)
 {
     Vector3f p(0, 0, 0);
-    Vector3f d((2.f * x / m_width) - 1, 1 - (2.f * y / m_height), -1);
+    // Vector3f d((2.f * x / m_width) - 1, 1 - (2.f * y / m_height), -1);
+
+    float jitterX = vanDerCorput(sampleIndex, 2);
+    float jitterY = vanDerCorput(sampleIndex, 3);
+
+    // Map the pixel coordinates from [0, m_width/m_height] to [-1, 1] and add the jitter for sub-pixel sampling
+    float normX = (2.f * (x + jitterX) / m_width) - 1;
+    float normY = 1 - (2.f * (y + jitterY) / m_height);
+
+    // Construct the direction vector for the ray
+    Vector3f d(normX, normY, -1);
     d.normalize();
 
     Ray r(p, d);
     r = r.transform(invViewMatrix);
-    return traceRay(r, scene, true);
+    return traceRay(r, scene, true, sampleIndex);
 }
 
-Vector3f PathTracer::traceRay(const Ray& r, const Scene& scene, bool count_emitted)
+Vector3f PathTracer::traceRay(const Ray& r, const Scene& scene, bool count_emitted, int sampleIndex)
 {
     IntersectionInfo i;
     Ray ray(r);
@@ -65,28 +76,34 @@ Vector3f PathTracer::traceRay(const Ray& r, const Scene& scene, bool count_emitt
        Vector3f newRayDir;
        Vector3f brdf;
        float pdf;
-       std::tie(newRayDir, pdf) = sampleNextDir();
+       int glossy_or_not;
+       if (mat.diffuse[0] > 0.4 && mat.diffuse[1] > 0.4 && mat.diffuse[2] > 0.4
+           && mat.specular[0] > 0.75 && mat.specular[1] > 0.75 && mat.specular[2] > 0.75){
+           glossy_or_not = 1;
+       }else{
+           glossy_or_not = 0;
+       }
+       std::tie(newRayDir, pdf) = sampleNextDir(glossy_or_not, mat, r.d, i);
+       int newSampleIndex = sampleIndex + 1;
 
        auto CTM = Quaternionf::FromTwoVectors(Vector3f(0.0f, 1.0f, 0.0f), i.object->getNormal(i));
        newRayDir = CTM * newRayDir;
 
-       Vector3f color = directLighting(r, scene, i);
+       Vector3f color = directLighting(r, scene, i, sampleIndex);
 
        if((static_cast<float>(rand()) / RAND_MAX) < settings.pathContinuationProb && !settings.directLightingOnly) {
            Ray newRay(i.hit + newRayDir * epsilon, newRayDir);
            brdf = BRDF(mat, r.d, i, newRayDir);
            //mirror
-           if (mat.diffuse[0] < 0.02 && mat.diffuse[1] < 0.02 && mat.diffuse[2] < 0.02 &&
-               mat.specular[0] > 0.9 && mat.specular[1] > 0.9 && mat.specular[2] > 0.9){
-
+           if (mat.illum == 5){
                Vector3f ks(mat.specular[0], mat.specular[1], mat.specular[2]);
                Vector3f viewDir = - r.d.normalized();
                Vector3f reflectedRay = 2 * viewDir.dot(i.object->getNormal(i)) * i.object->getNormal(i) - viewDir;
                reflectedRay.normalize();
                Ray newReflectedRay(i.hit + reflectedRay * epsilon, reflectedRay);
-               color += traceRay(newReflectedRay, scene, true).cwiseProduct(ks) / settings.pathContinuationProb;
+               color += traceRay(newReflectedRay, scene, true, sampleIndex + 1).cwiseProduct(ks) / settings.pathContinuationProb;
            //refraction
-           }else if (mat.diffuse[0] < 0.02 && mat.diffuse[1] < 0.02 && mat.diffuse[2] < 0.02 ){
+           }else if (mat.illum == 7){
                Vector3f refnormal = i.object->getNormal(i);
                float NdotI = refnormal.dot(r.d);
                float etai = 1.0f;
@@ -100,13 +117,16 @@ Vector3f PathTracer::traceRay(const Ray& r, const Scene& scene, bool count_emitt
                float eta = etai / etat;
                float k = 1 - eta * eta * (1 - NdotI * NdotI);
                float cosTheta_t = sqrt(k);
+
+               Vector3f absorptionCoefficient(0.15f, 0.15f, 0.15f); // Add this property to your material
+               float distance = 0.0f;
                if (k < 0){
                    Vector3f ks(mat.specular[0], mat.specular[1], mat.specular[2]);
                    Vector3f viewDir = - r.d.normalized();
                    Vector3f reflectedRay = 2 * viewDir.dot(i.object->getNormal(i)) * i.object->getNormal(i) - viewDir;
                    reflectedRay.normalize();
                    Ray newReflectedRay(i.hit + reflectedRay * epsilon, reflectedRay);
-                   color += traceRay(newReflectedRay, scene, true).cwiseProduct(ks) / settings.pathContinuationProb;
+                   color += traceRay(newReflectedRay, scene, true, sampleIndex + 1).cwiseProduct(ks) / settings.pathContinuationProb;
                }else{
                    float R0 = ((etai - etat) / (etai + etat)) * ((etai - etat) / (etai + etat));
                    float R_thetai = R0 + (1 - R0) * (1 - NdotI) * (1 - NdotI) * (1 - NdotI) * (1 - NdotI) * (1 - NdotI);
@@ -120,15 +140,17 @@ Vector3f PathTracer::traceRay(const Ray& r, const Scene& scene, bool count_emitt
                    reflectedRay.normalize();
                    Ray newReflectedRay(i.hit + reflectedRay * epsilon, reflectedRay);
                    if (((double) rand() / (RAND_MAX)) > R_thetai){
-                        color += traceRay(newRefractedRay, scene, true) / settings.pathContinuationProb;
+                        distance += (i.hit - ray.o).norm();
+                        Vector3f attenuation = (-absorptionCoefficient * distance).array().exp();
+                        color += traceRay(newRefractedRay, scene, true,  newSampleIndex).cwiseProduct(attenuation) / settings.pathContinuationProb;
                    }else{
-                       color += traceRay(newReflectedRay, scene, true).cwiseProduct(ks) / settings.pathContinuationProb;
+                       color += traceRay(newReflectedRay, scene, true, newSampleIndex).cwiseProduct(ks) / settings.pathContinuationProb;
                    }
 
                }
            }
            else{
-               color += traceRay(newRay, scene, false).cwiseProduct(brdf) * (newRayDir.dot(i.object->getNormal(i))) / (pdf * settings.pathContinuationProb);
+               color += traceRay(newRay, scene, false,  newSampleIndex).cwiseProduct(brdf) * (newRayDir.dot(i.object->getNormal(i))) / (pdf * settings.pathContinuationProb);
            }
        }
        if (count_emitted){
@@ -153,7 +175,7 @@ Vector3f PathTracer::BRDF(const tinyobj::material_t& mat, Vector3f inputRay, Int
         Vector3f reflectedRay = 2 * viewDir.dot(i.object->getNormal(i)) * i.object->getNormal(i) - viewDir;
         reflectedRay.normalize();
         newRayDir.normalize();
-        output = ks * (n + 2)/(2 * M_PI) * pow((reflectedRay.dot(newRayDir)), n);
+        output = ks * (n + 2)/(2 * M_PI) * pow((reflectedRay.dot(newRayDir)), n) ;
     //diffuse
     }else{
         output = color / M_PI;
@@ -162,29 +184,30 @@ Vector3f PathTracer::BRDF(const tinyobj::material_t& mat, Vector3f inputRay, Int
     return output;
 }
 
-Vector3f PathTracer::directLighting(const Ray& r, const Scene& scene, IntersectionInfo i){
+Vector3f PathTracer::directLighting(const Ray& r, const Scene& scene, IntersectionInfo i, int sampleIndex){
     Vector3f directLight(0.0f, 0.0f, 0.0f); // Initialize direct light contribution to black
     float area = 0.0f;
 
     const std::vector<Triangle*>& emissives = scene.getEmissives();
     for (Triangle* emissiveTriangle : emissives) {
         // Calculate direction from point of intersection to light source
-        Vector3f samplePoint = samplePointOnTriangle(emissiveTriangle->getVertices());
+        Vector3f samplePoint = samplePointOnTriangle(emissiveTriangle->getVertices(), sampleIndex);
         area = triangleArea(emissiveTriangle->getVertices());
 
         Vector3f lightDir = samplePoint - i.hit;
         float distanceSquared = lightDir.squaredNorm();
+        float maxDistance = lightDir.norm();
         lightDir.normalize();
 
         // Check visibility (shadow ray)
         Ray shadowRay(i.hit + i.object->getNormal(i) * 0.001f, lightDir);
         IntersectionInfo shadowInfo;
-        if (scene.getIntersection(shadowRay, &shadowInfo) && shadowInfo.t < sqrt(distanceSquared) - 0.01f * sqrt(distanceSquared)) {
+        if (scene.getIntersection(shadowRay, &shadowInfo) && shadowInfo.t < maxDistance * (1 - 0.001f)) {
             continue;
         }
 
         // Calculate the dot product between the light direction and the normal at the intersection
-        float NdotL = i.object->getNormal(i).dot(lightDir);
+        float NdotL = std::max(i.object->getNormal(i).dot(lightDir), 0.0f);
         float NdotLPrime = emissiveTriangle->getNormal(samplePoint).dot(-lightDir);
 
         Vector3f emittedLight = Vector3f(emissiveTriangle->getMaterial().emission[0],
@@ -194,7 +217,7 @@ Vector3f PathTracer::directLighting(const Ray& r, const Scene& scene, Intersecti
         if (NdotL + 0.001f > 0) { // Add light contribution if the surface faces the light
             const Triangle *t = static_cast<const Triangle *>(i.data);//Get the triangle in the mesh that was intersected
             const tinyobj::material_t& mat = t->getMaterial();
-            if (mat.diffuse[0] > 0.02 && mat.diffuse[1] > 0.02 && mat.diffuse[2] > 0.02){
+            if (mat.illum == 2){
                 directLight += emittedLight.cwiseProduct(BRDF(mat, r.d, i, lightDir)) * NdotL * NdotLPrime * area / (distanceSquared);
             }
         }
@@ -203,10 +226,18 @@ Vector3f PathTracer::directLighting(const Ray& r, const Scene& scene, Intersecti
     return directLight;
 }
 
-Vector3f PathTracer::samplePointOnTriangle(const Vector3<Vector3f>& vertices) {
+Vector3f PathTracer::sampleDisk(float radius) {
+    float r = sqrt((float)rand() / RAND_MAX) * radius;
+    float theta = ((float)rand() / RAND_MAX) * 2.0f * M_PI;
+    return Vector3f(r * cos(theta), r * sin(theta), 0.0f);
+}
+
+Vector3f PathTracer::samplePointOnTriangle(const Vector3<Vector3f>& vertices, int sampleIndex) {
     // Generate two random numbers
-    float r1 = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
-    float r2 = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+    // float r1 = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+    // float r2 = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+    float r1 = vanDerCorput(sampleIndex, 2);
+    float r2 = vanDerCorput(sampleIndex, 3);
 
     // Barycentric coordinates for uniform triangle sampling
     float sqrtR1 = sqrt(r1);
@@ -231,23 +262,35 @@ float PathTracer::triangleArea(const Eigen::Vector3<Eigen::Vector3f>& vertices) 
     return area;
 }
 
-std::pair<Vector3f, float> PathTracer::sampleNextDir() {
-    float r1 = static_cast<float>(rand()) / RAND_MAX;
-    float r2 = static_cast<float>(rand()) / RAND_MAX;
+float PathTracer::vanDerCorput(int n, const int &base){
+    float rand = 0;
+    float denom = 1;
+    float invBase = 1.f / base;
+    while (n){
+        denom = denom * base;
+        rand += (n % base) / denom;
+        n = n * invBase;
+    }
+    return rand;
+}
 
-    // Convert uniform random numbers to spherical coordinates
-    float phi = 2.0f * M_PI * r1;
-    float theta = acos(1.0f - r2);
+std::pair<Vector3f, float> PathTracer::sampleNextDir(int glossy_or_not, const tinyobj::material_t& mat, Eigen::Vector3f inputRay, IntersectionInfo i) {
+    // Uniform random numbers
+    float u1 = static_cast<float>(rand()) / RAND_MAX;
+    float u2 = static_cast<float>(rand()) / RAND_MAX;
+
+    float theta = acos(sqrt(u1));
+    float phi = 2.0 * M_PI * u2;
 
     float x = sin(theta) * cos(phi);
     float z = sin(theta) * sin(phi);
     float y = cos(theta);
 
-    Vector3f sampleDir(x, y, z);
+    Vector3f sampledDir(x, y, z);
+    float pdf = y / M_PI; // cos(theta) / pi
 
-    float pdf = 1.0f / (2.0f * M_PI);
+    return std::make_pair(sampledDir, pdf);
 
-    return std::make_pair(sampleDir, pdf);
 }
 
 

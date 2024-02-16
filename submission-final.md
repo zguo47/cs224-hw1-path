@@ -33,8 +33,21 @@ Please list all the features your path tracer implements.
 
 ### Extra Features 
 Briefly explain your implementation of any extra features, provide output images, and describe what each image demonstrates.
+| Extra Features | Without Implementation | My Implementation |
+| :---------------------------------------: | :--------------------------------------------------: | :-------------------------------------------------: |
+| Attenuate refracted paths |  ![](student_outputs/refraction_woatt.png) | ![](student_outputs/refraction.png) |
+| BRDF cosine importance sampling |  ![](student_outputs/cornell_box_full_lighting_without_importance.png) | ![](student_outputs/final/cornell_box_full_lighting.png) |
+| Low discrepancy sampling |  ![](student_outputs/cornell_box_full_lighting_woqmc.png) | ![](student_outputs/final/cornell_box_full_lighting.png) |
+
+I implemented attenuate refracted paths, BRDF cosine importance sampling, and low discrepancy sampling. 
+1. For attenuate refracted paths, I selected a absorption coefficient (0.15, 0.15, 0.15), to mimic a grey glass ball. As you can see from the above images, the sphere with attenuate path implemented is slightly darker than the one without. 
+2. For BRDF cosine importance sampling, I sample directions from the hemisphere around the surface normal in a way that is proportional to the cosine of the angle between the surface normal and the sampled direction. This is because the Lambertian BRDF is constant and the reflected radiance is proportional to the cosine of the angle between the surface normal and the outgoing direction. As you can see from the above images, the one implemented has slightly less noise and looks overall smoother than the one without. 
+3. For the Low discrepancy sampling, I implemented the Quasi Monte Carlo sampling for sampling rays from pixels. QMC samples the space more uniformly than purely random sequences. I use the van der Corput sequence to ensure that the samples are more uniformly distributed over the pixel area. As you can see from the above images, QMC introduces a great anti-aliasing to the image, so that the edges of the box looks a lot smoother, instead of having zig-zag patterns. 
+
 
 ### Collaboration/References
+N/A
 
 ### Known Bugs
+N/A
 

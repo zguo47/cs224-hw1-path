@@ -25,14 +25,18 @@ private:
 
     void toneMap(QRgb *imageData, std::vector<Eigen::Vector3f> &intensityValues);
 
-    Eigen::Vector3f tracePixel(int x, int y, const Scene &scene, const Eigen::Matrix4f &invViewMatrix);
-    Eigen::Vector3f traceRay(const Ray& r, const Scene &scene, bool count_emitted);
-    Eigen::Vector3f BRDF(const tinyobj::material_t&, Eigen::Vector3f inputRay, IntersectionInfo i, Eigen::Vector3f newRayDir);
-    std::pair<Eigen::Vector3f, float> sampleNextDir();
-    Eigen::Vector3f directLighting(const Ray& r, const Scene& scene, IntersectionInfo i);
+    Eigen::Vector3f tracePixel(int x, int y, const Scene &scene, const Eigen::Matrix4f &invViewMatrix, int sampleIndex);
+    Eigen::Vector3f traceRay(const Ray& r, const Scene &scene, bool count_emitted, int sampleIndex);
+    Eigen::Vector3f BRDF(const tinyobj::material_t& mat, Eigen::Vector3f inputRay, IntersectionInfo i, Eigen::Vector3f newRayDir);
+    std::pair<Eigen::Vector3f, float> sampleNextDir(int sampleIndex, const tinyobj::material_t& mat, Eigen::Vector3f inputRay, IntersectionInfo i);
+    Eigen::Vector3f directLighting(const Ray& r, const Scene& scene, IntersectionInfo i, int sampleIndex);
     float triangleArea(const Eigen::Vector3<Eigen::Vector3f>& vertices);
-    Eigen::Vector3f samplePointOnTriangle(const Eigen::Vector3<Eigen::Vector3f>& vertices);
-    void fresnel(const Eigen::Vector3f I, const Eigen::Vector3f normal, const float ior, float kr);
+    float vanDerCorput(int n, const int &base = 2);
+    Eigen::Vector3f samplePointOnTriangle(const Eigen::Vector3<Eigen::Vector3f>& vertices, int sampleIndex);
+    Eigen::Vector3f sampleDisk(float radius);
+
+    bool isPrime(int n);
+    int nextPrime(int n);
 };
 
 #endif // PATHTRACER_H
