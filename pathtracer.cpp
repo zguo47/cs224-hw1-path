@@ -76,14 +76,8 @@ Vector3f PathTracer::traceRay(const Ray& r, const Scene& scene, bool count_emitt
        Vector3f newRayDir;
        Vector3f brdf;
        float pdf;
-       int glossy_or_not;
-       if (mat.diffuse[0] > 0.4 && mat.diffuse[1] > 0.4 && mat.diffuse[2] > 0.4
-           && mat.specular[0] > 0.75 && mat.specular[1] > 0.75 && mat.specular[2] > 0.75){
-           glossy_or_not = 1;
-       }else{
-           glossy_or_not = 0;
-       }
-       std::tie(newRayDir, pdf) = sampleNextDir(glossy_or_not, mat, r.d, i);
+
+       std::tie(newRayDir, pdf) = sampleNextDir();
        int newSampleIndex = sampleIndex + 1;
 
        auto CTM = Quaternionf::FromTwoVectors(Vector3f(0.0f, 1.0f, 0.0f), i.object->getNormal(i));
@@ -274,7 +268,7 @@ float PathTracer::vanDerCorput(int n, const int &base){
     return rand;
 }
 
-std::pair<Vector3f, float> PathTracer::sampleNextDir(int glossy_or_not, const tinyobj::material_t& mat, Eigen::Vector3f inputRay, IntersectionInfo i) {
+std::pair<Vector3f, float> PathTracer::sampleNextDir() {
     // Uniform random numbers
     float u1 = static_cast<float>(rand()) / RAND_MAX;
     float u2 = static_cast<float>(rand()) / RAND_MAX;
